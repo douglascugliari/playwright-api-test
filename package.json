@@ -1,0 +1,21 @@
+{
+  "name": "Playwright-Api-Test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.26.0",
+  "devDependencies": {
+    "@faker-js/faker": "^10.3.0",
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.5.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1"
+  }
+}
