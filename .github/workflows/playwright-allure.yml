@@ -1,0 +1,237 @@
+name: Playwright API Tests with Allure Report
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run tests against'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+
+jobs:
+  test:
+    name: Execute API Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    strategy:
+      matrix:
+        node-version: [20, 22]
+      fail-fast: false
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Create test environment file
+        run: |
+          cat > .env << EOF
+          API_BASE_URL=${{ vars.API_BASE_URL || 'https://serverest.dev' }}
+          ENVIRONMENT=${{ github.event.inputs.environment || 'production' }}
+          RUN_ID=${{ github.run_id }}
+          RUN_NUMBER=${{ github.run_number }}
+          EOF
+
+      - name: Run Playwright tests with Allure
+        run: npm run test:allure
+        continue-on-error: true
+        env:
+          ALLURE_LABELS: "suite=API Tests,layer=API,host=github-actions"
+          ALLURE_SEVERITY: "critical"
+
+      - name: Generate Allure Report
+        if: always()
+        run: |
+          npm run allure:generate
+          echo "Allure report generated successfully"
+
+      - name: Add test metadata to Allure report
+        if: always()
+        run: |
+          cat > allure-results/environment.properties << EOF
+          Runner=GitHub Actions
+          Node Version=${{ matrix.node-version }}
+          OS=ubuntu-latest
+          Environment=${{ github.event.inputs.environment || 'production' }}
+          Branch=${{ github.ref_name }}
+          Commit=${{ github.sha }}
+          Run ID=${{ github.run_id }}
+          Run Number=${{ github.run_number }}
+          Repository=${{ github.repository }}
+          EOF
+
+      - name: Upload Allure Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-node-${{ matrix.node-version }}
+          path: allure-results/
+          retention-days: 30
+
+      - name: Upload Allure Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-node-${{ matrix.node-version }}
+          path: allure-report/
+          retention-days: 7
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-node-${{ matrix.node-version }}
+          path: test-results/
+          retention-days: 30
+
+      - name: Upload HTML Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-report-node-${{ matrix.node-version }}
+          path: playwright-report/
+          retention-days: 7
+
+  publish-report:
+    name: Publish Allure Report to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Allure Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-node-*
+          merge-multiple: true
+          path: allure-results/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Final Allure Report
+        run: |
+          npm run allure:generate
+          
+      - name: Generate Report Index
+        run: |
+          cat > allure-report/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>API Test Reports</title>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <style>
+                  body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
+                  .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                  h1 { color: #333; text-align: center; margin-bottom: 30px; }
+                  .report-link { display: block; background: #007bff; color: white; padding: 15px 20px; text-decoration: none; border-radius: 5px; margin: 10px 0; text-align: center; transition: background 0.3s; }
+                  .report-link:hover { background: #0056b3; }
+                  .meta { color: #666; font-size: 14px; margin-top: 30px; text-align: center; }
+                  .badge { background: #28a745; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; margin-left: 10px; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>🧪 API Test Reports</h1>
+                  <a href="index.html" class="report-link">
+                      📊 View Allure Report
+                  </a>
+                  <div class="meta">
+                      <p>Last updated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
+                      <p>Repository: <a href="${{ github.repositoryUrl }}" target="_blank">${{ github.repository }}</a></p>
+                      <p>Branch: ${{ github.ref_name }} <span class="badge">Automated</span></p>
+                  </div>
+              </div>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: allure-report
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Report Summary
+        run: |
+          echo "## 🎉 Allure Report Published!" >> $GITHUB_STEP_SUMMARY
+          echo "**📊 Report URL:** ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**🔗 Direct Allure Report:** ${{ steps.deployment.outputs.page_url }}/index.html" >> $GITHUB_STEP_SUMMARY
+          echo "**📅 Published:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**🌿 Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**🏷️ Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [test, publish-report]
+    if: always()
+    
+    steps:
+      - name: Job Summary
+        run: |
+          echo "## 📋 Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Execution | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Report Publishing | ${{ needs.publish-report.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.publish-report.result }}" == "success" ]]; then
+            echo "✅ Allure report is available at GitHub Pages" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Report publishing failed. Check artifacts for results." >> $GITHUB_STEP_SUMMARY
+          fi
