@@ -1,4 +1,4 @@
-name: Playwright CI - API Tests
+name: Playwright CI - API Tests with Allure
 
 on:
   push:
