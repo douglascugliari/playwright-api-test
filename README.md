@@ -210,6 +210,12 @@ pnpm exec playwright test --debug
 pnpm exec playwright test --debug tests/usuarios.spec.ts --grep "CT-001"
 ```
 
+## Próximos passos
+
+- [ ] Adicionar pipeline de CI/CD
+- [ ] Adicionar AfterEach para limpar os dados criados nos testes
+
+
 ## 🤝 Contribuição
 
 1. Crie uma branch para sua feature (`git checkout -b feature/nova-funcionalidade`)
